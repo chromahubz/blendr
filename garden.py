@@ -228,7 +228,9 @@ def flesh_material():
     return mat
 
 
-def eye_material():
+def eye_material(sclera=(0.93, 0.91, 0.9, 1), flush_color=(0.85, 0.35, 0.35, 1), flush_amount=0.6,
+                 vein_min=0.47, pupil="round", iris_glow=0.0):
+    """pupil: "round", "slit" or "none". iris_glow > 0 makes the iris emissive."""
     mat, nt, bsdf = node_mat("Eye")
     n, link = nt.nodes, nt.links
     coord = n.new("ShaderNodeTexCoord")
@@ -243,8 +245,10 @@ def eye_material():
     ramp = n.new("ShaderNodeValToRGB")
     els = ramp.color_ramp.elements
     els[0].position, els[0].color = 0.0, (0.01, 0.01, 0.01, 1)
-    els[1].position, els[1].color = 0.44, (0.93, 0.91, 0.9, 1)
-    for pos, col in [(0.15, (0.01, 0.01, 0.01, 1)), (0.17, IRIS[0]),
+    els[1].position, els[1].color = 0.44, sclera
+    if pupil != "round":  # the ramp's pupil becomes iris; a slit (or nothing) is added below
+        els[0].color = IRIS[0]
+    for pos, col in [(0.15, (0.01, 0.01, 0.01, 1) if pupil == "round" else IRIS[0]), (0.17, IRIS[0]),
                      (0.3, IRIS[1]), (0.39, IRIS[2]),
                      (0.42, (0.06, 0.07, 0.05, 1))]:
         e = els.new(pos)
@@ -260,6 +264,30 @@ def eye_material():
     fib.inputs["Factor"].default_value = 0.3
     link.new(ramp.outputs["Color"], fib.inputs["A"])
     link.new(noise.outputs["Color"], fib.inputs["B"])
+    iris_out = fib.outputs["Result"]
+    if pupil == "slit":  # tall narrow cat/demon pupil
+        sx = n.new("ShaderNodeMath")
+        sx.operation = "MULTIPLY"
+        sx.inputs[1].default_value = 3.0
+        link.new(sep.outputs["X"], sx.inputs[0])
+        sc = n.new("ShaderNodeCombineXYZ")
+        link.new(sx.outputs[0], sc.inputs["X"])
+        link.new(sep.outputs["Y"], sc.inputs["Y"])
+        sl = n.new("ShaderNodeVectorMath")
+        sl.operation = "LENGTH"
+        link.new(sc.outputs[0], sl.inputs[0])
+        smask = n.new("ShaderNodeMapRange")
+        smask.inputs["From Min"].default_value = 0.19
+        smask.inputs["From Max"].default_value = 0.21
+        smask.inputs["To Min"].default_value = 1.0
+        smask.inputs["To Max"].default_value = 0.0
+        link.new(sl.outputs["Value"], smask.inputs["Value"])
+        slit = n.new("ShaderNodeMix")
+        slit.data_type = "RGBA"
+        slit.inputs["B"].default_value = (0.005, 0.005, 0.005, 1)
+        link.new(smask.outputs[0], slit.inputs["Factor"])
+        link.new(iris_out, slit.inputs["A"])
+        iris_out = slit.outputs["Result"]
     # Back hemisphere is plain sclera.
     back = n.new("ShaderNodeMath")
     back.operation = "LESS_THAN"
@@ -267,9 +295,9 @@ def eye_material():
     link.new(sep.outputs["Z"], back.inputs[0])
     out = n.new("ShaderNodeMix")
     out.data_type = "RGBA"
-    out.inputs["B"].default_value = (0.93, 0.91, 0.9, 1)
+    out.inputs["B"].default_value = sclera
     link.new(back.outputs[0], out.inputs["Factor"])
-    link.new(fib.outputs["Result"], out.inputs["A"])
+    link.new(iris_out, out.inputs["A"])
     # Bloodshot: thin noise "ridges" as veins, denser toward the edge of the eye.
     vn = n.new("ShaderNodeTexNoise")
     vn.inputs["Scale"].default_value = 5.0
@@ -281,7 +309,7 @@ def eye_material():
     ridge.inputs[1].default_value = 0.5
     link.new(vn.outputs["Fac"], ridge.inputs[0])
     vein = n.new("ShaderNodeMapRange")
-    vein.inputs["From Min"].default_value = 0.47
+    vein.inputs["From Min"].default_value = vein_min
     vein.inputs["From Max"].default_value = 0.5
     link.new(ridge.outputs[0], vein.inputs["Value"])
     edge = n.new("ShaderNodeMapRange")
@@ -294,10 +322,10 @@ def eye_material():
     link.new(edge.outputs[0], vmask.inputs[1])
     tint = n.new("ShaderNodeMix")  # pink flush toward the corners
     tint.data_type = "RGBA"
-    tint.inputs["B"].default_value = (0.85, 0.35, 0.35, 1)
+    tint.inputs["B"].default_value = flush_color
     flush = n.new("ShaderNodeMath")
     flush.operation = "MULTIPLY"
-    flush.inputs[1].default_value = 0.6
+    flush.inputs[1].default_value = flush_amount
     link.new(edge.outputs[0], flush.inputs[0])
     link.new(flush.outputs[0], tint.inputs["Factor"])
     link.new(out.outputs["Result"], tint.inputs["A"])
@@ -310,6 +338,22 @@ def eye_material():
     bsdf.inputs["Roughness"].default_value = 0.3
     bsdf.inputs["Coat Weight"].default_value = 1.0
     bsdf.inputs["Coat Roughness"].default_value = 0.0
+    if iris_glow > 0:  # emissive iris, front hemisphere only
+        im = n.new("ShaderNodeMapRange")
+        im.inputs["From Min"].default_value = 0.4
+        im.inputs["From Max"].default_value = 0.43
+        im.inputs["To Min"].default_value = iris_glow
+        im.inputs["To Max"].default_value = 0.0
+        link.new(radial.outputs["Value"], im.inputs["Value"])
+        front = n.new("ShaderNodeMath")
+        front.operation = "GREATER_THAN"
+        link.new(sep.outputs["Z"], front.inputs[0])
+        st = n.new("ShaderNodeMath")
+        st.operation = "MULTIPLY"
+        link.new(im.outputs[0], st.inputs[0])
+        link.new(front.outputs[0], st.inputs[1])
+        link.new(iris_out, bsdf.inputs["Emission Color"])
+        link.new(st.outputs[0], bsdf.inputs["Emission Strength"])
     return mat
 
 

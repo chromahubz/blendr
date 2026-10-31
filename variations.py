@@ -1,4 +1,4 @@
-"""Render seeded variations of garden.py (palette, folds, eye, tear) plus a contact sheet.
+"""Render seeded variations of garden.py (face part, palette, folds, drip) plus a contact sheet.
 
 Run with Blender:      blender -b -P variations.py -- [count]
 Or with the bpy module: python variations.py [count]
@@ -33,10 +33,14 @@ def hsv(h, s, v):
     return (*colorsys.hsv_to_rgb(h % 1.0, s, v), 1)
 
 
+FEATURES = ["eye", "lips", "nose", "ear", "closed_eye"]
+
+
 def randomize(i, count):
+    """Variation i: its own part of the face, skin hue, pose, folds and drip."""
     rng = random.Random(i)
     h = (i / count + rng.uniform(-0.02, 0.02)) % 1.0  # spread skin hues round the wheel
-    g.SKIN = (hsv(h - 0.03, 0.6, 1.0), hsv(h, 0.97, 0.95), hsv(h + 0.02, 1.0, 0.3))
+    g.SKIN = (hsv(h - 0.03, 0.7, 0.92), hsv(h, 0.97, 0.9), hsv(h + 0.02, 1.0, 0.3))
     g.CREVICE = hsv(h, 1.0, 0.12)
     g.TITLE_COLOR = hsv(h + 0.5 + rng.uniform(-0.08, 0.08), 0.95, 1.0)
     g.FILL_COLOR = hsv(h, 0.4, 1.0)[:3]
@@ -45,9 +49,14 @@ def randomize(i, count):
     g.SWIRL = dict(cx=rng.uniform(-0.2, 0.3), cy=rng.uniform(-0.1, 0.25),
                    f1=rng.uniform(7, 13), f2=rng.uniform(17, 28),
                    phase=rng.uniform(0, 2 * math.pi), amp=rng.uniform(0.05, 0.09))
-    k = rng.uniform(0.85, 1.12)
-    g.EYE_W, g.EYE_H_TOP, g.EYE_H_BOT = 0.52 * k, 0.21 * k, 0.095 * k
-    g.EYE_TILT = math.radians(rng.uniform(-14, 6))
+    g.FEATURE = FEATURES[(i - 1) % len(FEATURES)]
+    if g.FEATURE == "ear":  # tall, keep it clear of the title
+        g.SCALE = rng.uniform(0.75, 0.9)
+        g.POS = np.array([rng.uniform(-0.2, 0.2), rng.uniform(-0.2, -0.1)])
+    else:
+        g.SCALE = rng.uniform(0.85, 1.12)
+        g.POS = np.array([rng.uniform(-0.15, 0.15), rng.uniform(-0.2, 0.0)])
+    g.TILT = math.radians(rng.uniform(-18, 12))
     g.GLANCE = (rng.uniform(-8, 4), rng.uniform(-18, 10))
     g.TEAR_BEND = (rng.uniform(0.08, 0.18), rng.uniform(-0.12, -0.05))
     g.TEAR_END = (rng.uniform(0.1, 0.28), rng.uniform(-0.7, -0.5))

@@ -1,4 +1,4 @@
-"""Painterly 3D close-up of a glaring, tearful eye
+"""Painterly 3D close-up of a glaring green eye shedding a radioactive tear
 (after Cabanel's "The Fallen Angel", 1847), with the "garden" title.
 
 Run with Blender:      blender -b -P fallen.py -- fallen.png
@@ -133,7 +133,7 @@ def build_face():
 
 
 def build_eye():
-    g.IRIS = ((0.12, 0.16, 0.2, 1), (0.42, 0.52, 0.62, 1), (0.12, 0.15, 0.19, 1))  # grey-blue
+    g.IRIS = ((0.04, 0.22, 0.04, 1), (0.25, 0.75, 0.12, 1), (0.03, 0.17, 0.03, 1))  # green
     bpy.ops.mesh.primitive_uv_sphere_add(segments=96, ring_count=48, radius=1.0)
     eye = bpy.context.active_object
     eye.name = "Eye"
@@ -169,7 +169,52 @@ def build_tear():
         x, y = x0 + 0.02 * t + 0.008 * math.sin(t * 5), y0 - 0.2 * t
         ball(x, y, 0.02 * (1 - 0.45 * t) * (1 + 0.15 * math.sin(t * 18)))
     ball(x0 + 0.02, y0 - 0.215, 0.019)  # gathering drop at the end
-    obj.data.materials.append(g.water_material())
+    obj.data.materials.append(radioactive_material())
+
+
+def radioactive_material():
+    """Glowing toxic-green liquid; the glow also lights the lid and cheek around it."""
+    mat, _, bsdf = g.node_mat("Radioactive tear")
+    green = (0.3, 1.0, 0.04, 1)
+    bsdf.inputs["Base Color"].default_value = green
+    bsdf.inputs["Emission Color"].default_value = green
+    bsdf.inputs["Emission Strength"].default_value = 6.0
+    bsdf.inputs["Transmission Weight"].default_value = 0.4
+    bsdf.inputs["Roughness"].default_value = 0.05
+    bsdf.inputs["Coat Weight"].default_value = 1.0
+    return mat
+
+
+def build_brow(seed=3):
+    """Individual brow hairs: sweeping toward the temple, standing up near the nose."""
+    rng = np.random.default_rng(seed)
+    curve = bpy.data.curves.new("Brow", "CURVE")
+    curve.dimensions = "3D"
+    curve.bevel_depth = 0.0016
+    curve.bevel_resolution = 2
+    for _ in range(380):
+        x0 = rng.uniform(-0.42, 0.13)
+        w = 0.035 + 0.012 * smoothstep(-0.3, 0.12, x0)
+        y0 = brow_line(x0) + 0.03 + rng.uniform(-0.8, 0.8) * w  # sits above the lid fold
+        inner = smoothstep(0.0, 0.17, x0)
+        ang = math.radians(195 - 85 * inner + rng.uniform(-12, 12))
+        length, bend = rng.uniform(0.035, 0.06), rng.uniform(-0.25, 0.25)
+        spl = curve.splines.new("NURBS")
+        spl.points.add(3)
+        for k, p in enumerate(spl.points):
+            t = k / 3
+            a = ang + bend * t
+            x, y = x0 + length * t * math.cos(a), y0 + length * t * math.sin(a)
+            p.co = (x, y, face_z(x, y) + 0.002 + 0.004 * t, 1)
+            p.radius = 1.0 - 0.8 * t
+        spl.use_endpoint_u = True
+        spl.order_u = 3
+    obj = bpy.data.objects.new("Brow", curve)
+    bpy.context.collection.objects.link(obj)
+    mat, _, bsdf = g.node_mat("Brow hair")
+    bsdf.inputs["Base Color"].default_value = (0.13, 0.04, 0.015, 1)  # dark auburn
+    bsdf.inputs["Roughness"].default_value = 0.4
+    obj.data.materials.append(mat)
 
 
 def build_lights_and_camera(scene):
@@ -197,15 +242,21 @@ def build_lights_and_camera(scene):
 
 
 def build_compositor(scene, size):
-    """Kuwahara filter: smooths detail into brush-stroke-like patches."""
+    """Kuwahara filter for brush strokes, then a bloom so the radioactive tear glows."""
     nt = bpy.data.node_groups.new("Painterly", "CompositorNodeTree")
     nt.interface.new_socket("Image", in_out="OUTPUT", socket_type="NodeSocketColor")
     rl = nt.nodes.new("CompositorNodeRLayers")
     kw = nt.nodes.new("CompositorNodeKuwahara")
-    kw.inputs["Size"].default_value = max(3, size // 128)
+    kw.inputs["Size"].default_value = max(4, size // 60)
+    glare = nt.nodes.new("CompositorNodeGlare")
+    glare.inputs["Type"].default_value = "Bloom"
+    glare.inputs["Threshold"].default_value = 3.0  # only the glowing tear blooms
+    glare.inputs["Strength"].default_value = 0.8
+    glare.inputs["Size"].default_value = 0.75
     out = nt.nodes.new("NodeGroupOutput")
     nt.links.new(rl.outputs["Image"], kw.inputs["Image"])
-    nt.links.new(kw.outputs[0], out.inputs[0])
+    nt.links.new(kw.outputs[0], glare.inputs["Image"])
+    nt.links.new(glare.outputs["Image"], out.inputs[0])
     scene.compositing_node_group = nt
     scene.render.compositor_device = "CPU"  # no GPU needed
 
@@ -220,7 +271,7 @@ def canvas_finish(path):
     px = px.reshape(h, w, 4)
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     f = 2.1 * 1024 / h  # same weave density at any resolution
-    weave = 1 + 0.015 * np.sin(xx * f) * np.sin(yy * f)
+    weave = 1 + 0.025 * np.sin(xx * f) * np.sin(yy * f)
     rng = np.random.default_rng(1)
     weave += rng.normal(0, 0.015, (h, w))
     vig = 1 - 0.35 * (((xx / w - 0.5) * 1.6) ** 2 + ((yy / h - 0.5) * 1.4) ** 2)
@@ -234,6 +285,7 @@ def main(out_png, size=1024, samples=64):
     scene = g.reset_scene()
     build_face()
     build_eye()
+    build_brow()
     build_tear()
     g.TITLE_COLOR = (0.32, 0.15, 0.03, 1)  # dark old gold, reads against the skin
     g.build_title()

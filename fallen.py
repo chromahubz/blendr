@@ -1,8 +1,8 @@
 """Painterly 3D close-up of a glaring green eye shedding a radioactive tear
 (after Cabanel's "The Fallen Angel", 1847), with the "garden" title.
 
-Run with Blender:      blender -b -P fallen.py -- fallen.png
-Or with the bpy module: python fallen.py fallen.png
+Run with Blender:      blender -b -P fallen.py -- fallen.png [--no-title]
+Or with the bpy module: python fallen.py fallen.png [--no-title]
 """
 import math
 import os
@@ -18,6 +18,16 @@ import garden as g  # noqa: E402  (eye, tear and title builders)
 EYE = np.array([-0.02, 0.05])
 EYE_TILT = math.radians(-4)
 EYE_W, EYE_H_TOP, EYE_H_BOT = 0.17, 0.045, 0.04  # narrowed: upper lid cuts the iris
+GLANCE = (2, -24)  # eyeball rotation in degrees: side-eye toward the viewer's left
+BROW_DROP = 0.07  # how far the brow slants down toward the nose (anger)
+
+# Look. fallen_variations.py overrides these.
+SKIN = (0.8, 0.52, 0.36, 1)
+BROW_COLOR = (0.13, 0.04, 0.015, 1)  # dark auburn
+IRIS = ((0.04, 0.22, 0.04, 1), (0.25, 0.75, 0.12, 1), (0.03, 0.17, 0.03, 1))  # green
+TEAR_COLOR = (0.3, 1.0, 0.04, 1)  # radioactive green
+TEAR_DRIFT = 0.02  # sideways drift of the tear as it runs down
+KEY_COLOR = (1.0, 0.84, 0.66)
 smoothstep = g.smoothstep
 
 
@@ -35,7 +45,7 @@ def almond_q(x, y):
 
 
 def brow_line(x):
-    return 0.2 - 0.11 * smoothstep(-0.3, 0.15, x)  # slants down toward the nose: a frown
+    return 0.21 - BROW_DROP * smoothstep(-0.3, 0.15, x)  # slants down toward the nose: a frown
 
 
 def face(x, y):
@@ -100,7 +110,7 @@ def skin_material(name, base):
     sep = n.new("ShaderNodeSeparateColor")
     link.new(attr.outputs["Color"], sep.inputs[0])
     color = None
-    for channel, paint in (("Red", (0.55, 0.13, 0.09, 1)), ("Green", (0.1, 0.045, 0.025, 1)),
+    for channel, paint in (("Red", (0.55, 0.13, 0.09, 1)), ("Green", BROW_COLOR),
                            ("Blue", (0.04, 0.02, 0.015, 1))):
         mix = n.new("ShaderNodeMix")
         mix.data_type = "RGBA"
@@ -127,24 +137,24 @@ def skin_material(name, base):
 
 def build_face():
     obj = grid_mesh("Face", np.linspace(-0.5, 0.55, 700), np.linspace(-0.45, 0.5, 640), face)
-    obj.data.materials.append(skin_material("Face skin", (0.8, 0.52, 0.36, 1)))
+    obj.data.materials.append(skin_material("Face skin", SKIN))
     sub = obj.modifiers.new("Smooth", "SUBSURF")
     sub.levels, sub.render_levels = 0, 1
 
 
 def build_eye():
-    g.IRIS = ((0.04, 0.22, 0.04, 1), (0.25, 0.75, 0.12, 1), (0.03, 0.17, 0.03, 1))  # green
+    g.IRIS = IRIS
     bpy.ops.mesh.primitive_uv_sphere_add(segments=96, ring_count=48, radius=1.0)
     eye = bpy.context.active_object
     eye.name = "Eye"
-    eye.scale = (0.17, 0.17, 0.1)  # flattened so it stays behind the low lower lid
+    eye.scale = (EYE_W, EYE_W, 0.1)  # flattened so it stays behind the low lower lid
     # Sink it just below the lowest point of the lid rim (ellipsoid is ~0.11 deep once turned).
     X, Y = np.meshgrid(np.linspace(-0.25, 0.25, 300), np.linspace(-0.15, 0.25, 300))
     z, _, _ = face(X.ravel(), Y.ravel())
     q, _ = almond_q(X.ravel(), Y.ravel())
     rim_min = z[(q > 1) & (q < 1.05)].min()
     eye.location = (EYE[0], EYE[1] + 0.005, rim_min - 0.12)
-    eye.rotation_euler = (math.radians(2), math.radians(-24), 0)  # side-eye toward the viewer's left
+    eye.rotation_euler = (math.radians(GLANCE[0]), math.radians(GLANCE[1]), 0)
     bpy.ops.object.shade_smooth()
     eye.data.materials.append(g.eye_material())
 
@@ -166,18 +176,17 @@ def build_tear():
         ball(EYE[0] + c * u - s * v, EYE[1] + s * u + c * v, 0.006 + 0.004 * (t + 0.8))
     x0, y0 = EYE[0] + 0.05, EYE[1] - 0.06
     for t in np.linspace(0, 1, 40):  # swollen bead spilling over the lid, running down the cheek
-        x, y = x0 + 0.02 * t + 0.008 * math.sin(t * 5), y0 - 0.2 * t
+        x, y = x0 + TEAR_DRIFT * t + 0.008 * math.sin(t * 5), y0 - 0.2 * t
         ball(x, y, 0.02 * (1 - 0.45 * t) * (1 + 0.15 * math.sin(t * 18)))
-    ball(x0 + 0.02, y0 - 0.215, 0.019)  # gathering drop at the end
+    ball(x0 + TEAR_DRIFT, y0 - 0.215, 0.019)  # gathering drop at the end
     obj.data.materials.append(radioactive_material())
 
 
 def radioactive_material():
-    """Glowing toxic-green liquid; the glow also lights the lid and cheek around it."""
+    """Glowing toxic liquid; the glow also lights the lid and cheek around it."""
     mat, _, bsdf = g.node_mat("Radioactive tear")
-    green = (0.3, 1.0, 0.04, 1)
-    bsdf.inputs["Base Color"].default_value = green
-    bsdf.inputs["Emission Color"].default_value = green
+    bsdf.inputs["Base Color"].default_value = TEAR_COLOR
+    bsdf.inputs["Emission Color"].default_value = TEAR_COLOR
     bsdf.inputs["Emission Strength"].default_value = 6.0
     bsdf.inputs["Transmission Weight"].default_value = 0.4
     bsdf.inputs["Roughness"].default_value = 0.05
@@ -192,19 +201,24 @@ def build_brow(seed=3):
     curve.dimensions = "3D"
     curve.bevel_depth = 0.0016
     curve.bevel_resolution = 2
-    for _ in range(380):
+    placed = 0
+    while placed < 380:
         x0 = rng.uniform(-0.42, 0.13)
         w = 0.035 + 0.012 * smoothstep(-0.3, 0.12, x0)
         y0 = brow_line(x0) + 0.03 + rng.uniform(-0.8, 0.8) * w  # sits above the lid fold
         inner = smoothstep(0.0, 0.17, x0)
         ang = math.radians(195 - 85 * inner + rng.uniform(-12, 12))
         length, bend = rng.uniform(0.035, 0.06), rng.uniform(-0.25, 0.25)
+        ts = np.linspace(0, 1, 4)
+        xs = x0 + length * ts * np.cos(ang + bend * ts)
+        ys = y0 + length * ts * np.sin(ang + bend * ts)
+        if almond_q(xs, ys)[0].min() < 1.9:  # keep every hair clear of the eye
+            continue
+        placed += 1
         spl = curve.splines.new("NURBS")
         spl.points.add(3)
-        for k, p in enumerate(spl.points):
-            t = k / 3
-            a = ang + bend * t
-            x, y = x0 + length * t * math.cos(a), y0 + length * t * math.sin(a)
+        for k, (p, x, y) in enumerate(zip(spl.points, xs, ys)):
+            t = ts[k]
             p.co = (x, y, face_z(x, y) + 0.002 + 0.004 * t, 1)
             p.radius = 1.0 - 0.8 * t
         spl.use_endpoint_u = True
@@ -212,7 +226,7 @@ def build_brow(seed=3):
     obj = bpy.data.objects.new("Brow", curve)
     bpy.context.collection.objects.link(obj)
     mat, _, bsdf = g.node_mat("Brow hair")
-    bsdf.inputs["Base Color"].default_value = (0.13, 0.04, 0.015, 1)  # dark auburn
+    bsdf.inputs["Base Color"].default_value = BROW_COLOR
     bsdf.inputs["Roughness"].default_value = 0.4
     obj.data.materials.append(mat)
 
@@ -227,7 +241,7 @@ def build_lights_and_camera(scene):
         obj.rotation_quaternion = (-Vector(loc)).to_track_quat("-Z", "Y")
         scene.collection.objects.link(obj)
 
-    area("Key", (-3.0, 1.2, 1.8), 1.5, 650, (1.0, 0.84, 0.66))
+    area("Key", (-3.0, 1.2, 1.8), 1.5, 650, KEY_COLOR)
     area("Fill", (2.0, -0.5, 2.0), 3.0, 15, (0.6, 0.7, 1.0))
     world = bpy.data.worlds.new("World")
     world.use_nodes = True
@@ -281,17 +295,18 @@ def canvas_finish(path):
     img.save()
 
 
-def main(out_png, size=1024, samples=64):
+def main(out_png, size=1024, samples=64, title=True):
     scene = g.reset_scene()
     build_face()
     build_eye()
     build_brow()
     build_tear()
-    g.TITLE_COLOR = (0.32, 0.15, 0.03, 1)  # dark old gold, reads against the skin
-    g.build_title()
-    title = bpy.data.objects["Title"]
-    title.location = (0.02, 0.33, 0.7)
-    title.scale = (0.3, 0.3, 0.3)
+    if title:
+        g.TITLE_COLOR = (0.32, 0.15, 0.03, 1)  # dark old gold, reads against the skin
+        g.build_title()
+        obj = bpy.data.objects["Title"]
+        obj.location = (0.02, 0.33, 0.7)
+        obj.scale = (0.3, 0.3, 0.3)
     build_lights_and_camera(scene)
 
     scene.render.engine = "CYCLES"
@@ -309,4 +324,4 @@ def main(out_png, size=1024, samples=64):
 
 if __name__ == "__main__":
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
-    main(os.path.abspath(args[0] if args else "fallen.png"))
+    main(os.path.abspath(args[0] if args else "fallen.png"), title="--no-title" not in args)

@@ -57,6 +57,7 @@ def contact_sheet(paths, out):
     tiles = []
     for p in paths:
         img = bpy.data.images.load(p)
+        img.colorspace_settings.name = "Non-Color"  # raw pixels, no colour conversion
         px = np.empty(img.size[0] * img.size[1] * 4, dtype=np.float32)
         img.pixels.foreach_get(px)
         tiles.append(px.reshape(img.size[1], img.size[0], 4))
@@ -67,6 +68,7 @@ def contact_sheet(paths, out):
         r, c = rows - 1 - n // COLS, n % COLS
         sheet[r * th:(r + 1) * th, c * tw:(c + 1) * tw] = t
     img = bpy.data.images.new("contact_sheet", COLS * tw, rows * th)
+    img.colorspace_settings.name = "Non-Color"
     img.pixels.foreach_set(sheet.ravel())
     img.filepath_raw, img.file_format = out, "PNG"
     img.save()

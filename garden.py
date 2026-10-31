@@ -1,4 +1,4 @@
-"""Glossy pink flesh-and-eye scene with "garden" title, built procedurally in Blender.
+"""Glossy neon-green flesh-and-eye scene with "garden" title, built procedurally in Blender.
 
 Run with Blender:      blender -b -P garden.py -- out.png
 Or with the bpy module: python garden.py out.png
@@ -18,7 +18,7 @@ TITLE = "garden"
 # Eye opening (almond) in world XY.
 EYE = np.array([-0.05, -0.08])
 EYE_TILT = math.radians(-6)
-EYE_W, EYE_H_TOP, EYE_H_BOT = 0.42, 0.17, 0.075
+EYE_W, EYE_H_TOP, EYE_H_BOT = 0.52, 0.21, 0.095
 
 
 def smoothstep(a, b, x):
@@ -77,29 +77,29 @@ def flesh_material():
     coord = n.new("ShaderNodeTexCoord")
     sep = n.new("ShaderNodeSeparateXYZ")
     link.new(coord.outputs["Object"], sep.inputs[0])
-    # Diagonal gradient: pale pink lower-left -> hot red upper-right.
+    # Diagonal gradient: pale lime lower-left -> deep neon green upper-right.
     add = n.new("ShaderNodeMath")
     add.operation = "ADD"
     link.new(sep.outputs["X"], add.inputs[0])
     link.new(sep.outputs["Y"], add.inputs[1])
     ramp = n.new("ShaderNodeValToRGB")
     ramp.color_ramp.elements[0].position = 0.15
-    ramp.color_ramp.elements[0].color = (1.0, 0.42, 0.52, 1)
+    ramp.color_ramp.elements[0].color = (0.4, 1.0, 0.12, 1)
     ramp.color_ramp.elements[1].position = 0.85
-    ramp.color_ramp.elements[1].color = (0.62, 0.01, 0.07, 1)
+    ramp.color_ramp.elements[1].color = (0.02, 0.3, 0.0, 1)
     mid = ramp.color_ramp.elements.new(0.5)
-    mid.color = (0.95, 0.12, 0.28, 1)
+    mid.color = (0.22, 0.95, 0.02, 1)
     mapr = n.new("ShaderNodeMapRange")
     mapr.inputs["From Min"].default_value = -1.6
     mapr.inputs["From Max"].default_value = 1.6
     link.new(add.outputs[0], mapr.inputs["Value"])
     link.new(mapr.outputs[0], ramp.inputs[0])
-    # Deepen crevices toward red.
+    # Deepen crevices toward dark green.
     ao = n.new("ShaderNodeAmbientOcclusion")
     ao.inputs["Distance"].default_value = 0.15
     mix = n.new("ShaderNodeMix")
     mix.data_type = "RGBA"
-    mix.inputs["B"].default_value = (0.55, 0.0, 0.06, 1)
+    mix.inputs["B"].default_value = (0.0, 0.12, 0.0, 1)
     inv = n.new("ShaderNodeMath")
     inv.operation = "SUBTRACT"
     inv.inputs[0].default_value = 1.0
@@ -158,7 +158,43 @@ def eye_material():
     out.inputs["B"].default_value = (0.93, 0.91, 0.9, 1)
     link.new(back.outputs[0], out.inputs["Factor"])
     link.new(fib.outputs["Result"], out.inputs["A"])
-    link.new(out.outputs["Result"], bsdf.inputs["Base Color"])
+    # Bloodshot: thin noise "ridges" as veins, denser toward the edge of the eye.
+    vn = n.new("ShaderNodeTexNoise")
+    vn.inputs["Scale"].default_value = 5.0
+    vn.inputs["Detail"].default_value = 8.0
+    vn.inputs["Distortion"].default_value = 0.6
+    link.new(coord.outputs["Object"], vn.inputs["Vector"])
+    ridge = n.new("ShaderNodeMath")
+    ridge.operation = "PINGPONG"  # |fac - 0.5| style fold
+    ridge.inputs[1].default_value = 0.5
+    link.new(vn.outputs["Fac"], ridge.inputs[0])
+    vein = n.new("ShaderNodeMapRange")
+    vein.inputs["From Min"].default_value = 0.47
+    vein.inputs["From Max"].default_value = 0.5
+    link.new(ridge.outputs[0], vein.inputs["Value"])
+    edge = n.new("ShaderNodeMapRange")
+    edge.inputs["From Min"].default_value = 0.42
+    edge.inputs["From Max"].default_value = 0.85
+    link.new(radial.outputs["Value"], edge.inputs["Value"])
+    vmask = n.new("ShaderNodeMath")
+    vmask.operation = "MULTIPLY"
+    link.new(vein.outputs[0], vmask.inputs[0])
+    link.new(edge.outputs[0], vmask.inputs[1])
+    tint = n.new("ShaderNodeMix")  # pink flush toward the corners
+    tint.data_type = "RGBA"
+    tint.inputs["B"].default_value = (0.85, 0.35, 0.35, 1)
+    flush = n.new("ShaderNodeMath")
+    flush.operation = "MULTIPLY"
+    flush.inputs[1].default_value = 0.6
+    link.new(edge.outputs[0], flush.inputs[0])
+    link.new(flush.outputs[0], tint.inputs["Factor"])
+    link.new(out.outputs["Result"], tint.inputs["A"])
+    blood = n.new("ShaderNodeMix")
+    blood.data_type = "RGBA"
+    blood.inputs["B"].default_value = (0.45, 0.0, 0.02, 1)
+    link.new(vmask.outputs[0], blood.inputs["Factor"])
+    link.new(tint.outputs["Result"], blood.inputs["A"])
+    link.new(blood.outputs["Result"], bsdf.inputs["Base Color"])
     bsdf.inputs["Roughness"].default_value = 0.3
     bsdf.inputs["Coat Weight"].default_value = 1.0
     bsdf.inputs["Coat Roughness"].default_value = 0.0
@@ -167,18 +203,18 @@ def eye_material():
 
 def water_material():
     mat, nt, bsdf = node_mat("Tears")
-    bsdf.inputs["Base Color"].default_value = (1.0, 0.92, 0.95, 1)
-    bsdf.inputs["Transmission Weight"].default_value = 0.85
+    bsdf.inputs["Base Color"].default_value = (1.0, 1.0, 1.0, 1)
+    bsdf.inputs["Transmission Weight"].default_value = 1.0
     bsdf.inputs["Roughness"].default_value = 0.0
-    bsdf.inputs["IOR"].default_value = 1.33
+    bsdf.inputs["IOR"].default_value = 1.5  # a bit above water so edges read
     return mat
 
 
 def title_material():
     mat, nt, bsdf = node_mat("Title")
-    lime = (0.08, 0.55, 0.0, 1)
-    bsdf.inputs["Base Color"].default_value = lime
-    bsdf.inputs["Emission Color"].default_value = lime
+    pink = (1.0, 0.03, 0.35, 1)
+    bsdf.inputs["Base Color"].default_value = pink
+    bsdf.inputs["Emission Color"].default_value = pink
     bsdf.inputs["Emission Strength"].default_value = 0.15
     bsdf.inputs["Roughness"].default_value = 0.3
     return mat
@@ -214,41 +250,61 @@ def build_eye():
     bpy.ops.mesh.primitive_uv_sphere_add(segments=96, ring_count=48, radius=1.0)
     eye = bpy.context.active_object
     eye.name = "Eye"
-    eye.scale = (0.33, 0.33, 0.33)
-    eye.location = (EYE[0], EYE[1], -0.27)
+    eye.scale = (0.5, 0.42, 0.46)
+    eye.location = (EYE[0], EYE[1] + 0.05, -0.41)
     eye.rotation_euler = (math.radians(-4), math.radians(-12), 0)  # glance left
     bpy.ops.object.shade_smooth()
     eye.data.materials.append(eye_material())
+    # Clear glassy cornea bulging over the iris.
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=96, ring_count=48, radius=0.55,
+                                         location=(0, 0, 0.56))
+    cornea = bpy.context.active_object
+    cornea.name = "Cornea"
+    cornea.parent = eye
+    cornea.visible_shadow = False
+    bpy.ops.object.shade_smooth()
+    mat, _, bsdf = node_mat("Cornea")
+    bsdf.inputs["Transmission Weight"].default_value = 1.0
+    bsdf.inputs["Roughness"].default_value = 0.0
+    bsdf.inputs["IOR"].default_value = 1.376
+    cornea.data.materials.append(mat)
 
 
 def build_tears():
     mb = bpy.data.metaballs.new("Tears")
     mb.resolution = mb.render_resolution = 0.006
     obj = bpy.data.objects.new("Tears", mb)
+    obj.visible_shadow = False  # glass would cast dark shadows without caustics
     bpy.context.collection.objects.link(obj)
 
-    def ball(x, y, r, lift=0.6):
+    def ball(x, y, r, lift=1.1):
         el = mb.elements.new()
         el.co = (x, y, float(height(np.array([x]), np.array([y]))[0]) + r * lift)
         el.radius = r * 1.4
 
-    # Wet film along the lower lid.
-    for t in np.linspace(-0.75, 0.75, 45):
-        u = t * EYE_W
+    c, s = math.cos(EYE_TILT), math.sin(EYE_TILT)
+
+    def lid(u, v):  # eye-local (along the slant) -> world XY
+        return EYE[0] + c * u - s * v, EYE[1] + s * u + c * v
+
+    # Wet film along the lower lid, swelling toward the outer (right) corner.
+    for t in np.linspace(-0.7, 0.92, 60):
         v = -EYE_H_BOT * math.sqrt(max(1 - t * t, 0.0)) - 0.025
-        c, s = math.cos(EYE_TILT), math.sin(EYE_TILT)
-        ball(EYE[0] + c * u - s * v, EYE[1] + s * u + c * v, 0.022 * (1 - 0.5 * abs(t)))
-    # Tear bead spilling over the lid and streaming down-right.
-    path = [(0.05, -0.19, 0.05), (0.07, -0.25, 0.035), (0.09, -0.32, 0.03),
-            (0.11, -0.4, 0.028), (0.14, -0.48, 0.032), (0.17, -0.55, 0.026),
-            (0.2, -0.62, 0.03), (0.24, -0.68, 0.024)]
-    for (x0, y0, r0), (x1, y1, r1) in zip(path, path[1:]):
-        for t in np.linspace(0, 1, 5, endpoint=False):
-            ball(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, r0 + (r1 - r0) * t)
-    # Loose droplets and a splash further down.
-    for x, y, r in [(0.3, -0.75, 0.028), (0.36, -0.79, 0.02), (0.44, -0.8, 0.026),
-                    (0.5, -0.86, 0.018), (0.58, -0.84, 0.022), (0.27, -0.84, 0.016),
-                    (0.4, -0.9, 0.014), (0.65, -0.9, 0.015), (-0.02, -0.3, 0.018)]:
+        ball(*lid(t * EYE_W, v), 0.012 + 0.014 * (t + 0.7) / 1.62)
+    # Tear pooling in the outer corner.
+    for k, r in enumerate([0.045, 0.04, 0.032]):
+        ball(*lid(EYE_W * (0.95 - 0.05 * k), -0.03 - 0.008 * k), r)
+    # Stream spilling from the corner: first along the eye's slant, then curving
+    # down with gravity, beading as it thins.
+    p0 = np.array(lid(EYE_W * 0.95, -0.03))
+    p1, p2 = np.array([0.58, -0.25]), np.array([0.66, -0.78])
+    for t in np.linspace(0, 1, 70):
+        x, y = (1 - t) ** 2 * p0 + 2 * (1 - t) * t * p1 + t * t * p2
+        ball(x, y, 0.04 * (1 - 0.4 * t) * (1 + 0.3 * math.sin(t * 28)))
+    # Drops gathering and splashing at the end of the stream.
+    for x, y, r in [(0.67, -0.84, 0.026), (0.64, -0.9, 0.016), (0.73, -0.88, 0.018),
+                    (0.59, -0.86, 0.012), (0.78, -0.93, 0.013), (0.7, -0.95, 0.01),
+                    (0.55, -0.92, 0.009), (0.5, -0.45, 0.012)]:
         ball(x, y, r)
     obj.data.materials.append(water_material())
 
@@ -283,14 +339,14 @@ def build_lights_and_camera(scene):
         obj.rotation_quaternion = Vector(d).to_track_quat("-Z", "Y")
 
     area("Key", (-2.0, 2.2, 3.0), 2.5, 1.2, 350, (1.0, 0.95, 0.95))
-    area("Fill", (2.5, -1.5, 1.5), 3.0, 3.0, 120, (1.0, 0.6, 0.65))
+    area("Fill", (2.5, -1.5, 1.5), 3.0, 3.0, 120, (0.7, 1.0, 0.55))
     # Long thin strip for the wet streak highlights.
     area("Streak", (0.5, 2.5, 2.5), 4.0, 0.15, 250, (1.0, 1.0, 1.0))
 
     world = bpy.data.worlds.new("World")
     world.use_nodes = True
     bg = world.node_tree.nodes["Background"]
-    bg.inputs["Color"].default_value = (0.9, 0.45, 0.5, 1)
+    bg.inputs["Color"].default_value = (0.5, 0.9, 0.4, 1)
     bg.inputs["Strength"].default_value = 0.2
     scene.world = world
 

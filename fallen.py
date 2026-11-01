@@ -30,7 +30,7 @@ TEAR_DRIFT = 0.02  # sideways drift of the tear as it runs down
 KEY_COLOR = (1.0, 0.84, 0.66)
 TEAR_KIND = "glow"  # glow | blood | water | gold | chrome | ink | milk | honey
 EYE_LOOK = {}  # keyword overrides for garden.eye_material (sclera, pupil, iris_glow...)
-EXTRAS = ()  # any of: horns, flowers, piercing, eyeshadow, cracks, freckles, lashes
+EXTRAS = ()  # any of: horns, flowers, piercing, eyeshadow, cracks, freckles, lashes, fangs
 EYESHADOW = (0.3, 0.02, 0.25, 1)
 HORN_COLOR = (0.06, 0.02, 0.015, 1)
 METAL = (0.9, 0.9, 0.92, 1)  # piercing metal
@@ -49,6 +49,54 @@ def almond_q(x, y):
     hv = np.where(v > 0, EYE_H_TOP, EYE_H_BOT)
     pinch = np.maximum(1 - (u / EYE_W) ** 2, 0.05) ** 0.5
     return np.sqrt((u / EYE_W) ** 2 + (v / hv) ** 2 / pinch), v
+
+
+MOUTH = np.array([0.22, -0.62])  # used with "fangs": the camera pulls back to show it
+MOUTH_W, MOUTH_H_TOP, MOUTH_H_BOT = 0.17, 0.055, 0.07  # a snarl: lips drawn back
+
+
+def mouth_q(x, y):
+    u, v = x - MOUTH[0], y - MOUTH[1]
+    hv = np.where(v > 0, MOUTH_H_TOP, MOUTH_H_BOT)
+    pinch = np.maximum(1 - (u / MOUTH_W) ** 2, 0.05) ** 0.5
+    return np.sqrt((u / MOUTH_W) ** 2 + (v / hv) ** 2 / pinch), u, v
+
+
+def mouth_edge(u, top=True):
+    """v of the mouth opening's upper / lower edge at u (approximate, for placing teeth)."""
+    a = max(1 - (u / MOUTH_W) ** 2, 0.0)
+    return (MOUTH_H_TOP if top else -MOUTH_H_BOT) * a ** 0.75
+
+
+def dist_to_segment(x, y, p0, p1):
+    p0, p1 = np.array(p0), np.array(p1)
+    d = p1 - p0
+    t = np.clip(((x - p0[0]) * d[0] + (y - p0[1]) * d[1]) / d.dot(d), 0, 1)
+    return np.hypot(x - (p0[0] + t * d[0]), y - (p0[1] + t * d[1]))
+
+
+def lower_face(x, y):
+    """Nose tip, snarl crease, lips and the open mouth (only with fangs).
+    Returns height, keep-face mask, lip paint and nostril shadow paint."""
+    mq, u, v = mouth_q(x, y)
+    up = smoothstep(-0.01, 0.01, v)
+    dome = lambda ry: 0.35 * np.sqrt(np.clip(1 - ((x + 0.1) / 1.1) ** 2 - ((y - 0.05) / ry) ** 2, 0, 1))
+    z = dome(1.4) - dome(0.9)  # the face carries on down to the chin
+    z -= 0.2 * np.exp(-((x - 0.25) / 0.08) ** 2) * smoothstep(-0.25, -0.4, y)  # nose bridge ends
+    z += 0.08 * np.exp(-((u / 0.3) ** 2 + ((v + 0.02) / 0.2) ** 2))  # muzzle
+    z += 0.05 * np.exp(-((mq - 1.3) / 0.22) ** 2) * up  # upper lip, drawn back
+    z += 0.065 * np.exp(-((mq - 1.35) / 0.25) ** 2) * (1 - up)  # full lower lip
+    z -= 0.07 * smoothstep(1.3, 1.0, mq)  # lips roll into the mouth
+    z -= 0.015 * np.exp(-(u / 0.02) ** 2) * smoothstep(0.06, 0.12, v) * smoothstep(0.3, 0.2, v)  # philtrum
+    z += 0.18 * np.exp(-(((x - 0.27) / 0.09) ** 2 + ((y + 0.29) / 0.075) ** 2))  # nose tip
+    z += 0.1 * np.exp(-(((x - 0.16) / 0.06) ** 2 + ((y + 0.33) / 0.05) ** 2))  # nose wing
+    nq = np.sqrt(((x - 0.225) / 0.04) ** 2 + ((y + 0.365) / 0.02) ** 2)
+    z -= 0.05 * smoothstep(1.6, 0.6, nq)  # nostril: a shaded hollow, not a hole
+    z -= 0.03 * np.exp(-(dist_to_segment(x, y, (0.13, -0.34), (0.03, -0.6)) / 0.018) ** 2)  # snarl crease
+    z += 0.03 * np.exp(-((x / 0.12) ** 2 + ((y + 0.38) / 0.1) ** 2))  # cheek bunched above it
+    lips = np.exp(-((mq - 1.25) / 0.2) ** 2) * (mq < 1.8)
+    nostril = 0.75 * smoothstep(1.2, 0.5, nq)
+    return z, mq >= 1.0, lips, nostril
 
 
 def brow_line(x):
@@ -104,7 +152,11 @@ def face(x, y):
             near = (np.abs(x - fx) < 3 * fr) & (np.abs(y - fy) < 3 * fr)
             freckles[near] += np.exp(-((x[near] - fx) ** 2 + (y[near] - fy) ** 2) / fr ** 2)
         freckles *= q >= 1.2
-    return z, q >= 1.0, np.stack([np.clip(red, 0, 1), np.clip(brow, 0, 1), lashes, shadow,
+    keep = q >= 1.0
+    if "fangs" in EXTRAS:
+        zl, keep_l, lips, nostril = lower_face(x, y)
+        z, keep, red, lashes = z + zl, keep & keep_l, red + lips, lashes + nostril
+    return z, keep, np.stack([np.clip(red, 0, 1), np.clip(brow, 0, 1), lashes, shadow,
                                   cracks, np.clip(freckles, 0, 0.8)], axis=1)
 
 
@@ -169,7 +221,10 @@ def skin_material(name, base):
 
 
 def build_face():
-    obj = grid_mesh("Face", np.linspace(-0.5, 0.55, 700), np.linspace(-0.45, 0.5, 640), face)
+    if "fangs" in EXTRAS:  # wider frame down to the chin
+        obj = grid_mesh("Face", np.linspace(-0.45, 0.7, 900), np.linspace(-1.0, 0.45, 1000), face)
+    else:
+        obj = grid_mesh("Face", np.linspace(-0.5, 0.55, 700), np.linspace(-0.45, 0.5, 640), face)
     obj.data.materials.append(skin_material("Face skin", SKIN))
     sub = obj.modifiers.new("Smooth", "SUBSURF")
     sub.levels, sub.render_levels = 0, 1
@@ -212,6 +267,11 @@ def build_tear():
         x, y = x0 + TEAR_DRIFT * t + 0.008 * math.sin(t * 5), y0 - 0.2 * t
         ball(x, y, 0.02 * (1 - 0.45 * t) * (1 + 0.15 * math.sin(t * 18)))
     ball(x0 + TEAR_DRIFT, y0 - 0.215, 0.019)  # gathering drop at the end
+    if "fangs" in EXTRAS:  # a drip running off the fang and down the chin
+        fx, fy = MOUTH[0] + 0.07, MOUTH[1] - 0.085
+        for t in np.linspace(0, 1, 30):
+            ball(fx + 0.01 * math.sin(t * 4), fy - 0.17 * t, 0.012 * (1 - 0.3 * t) * (1 + 0.15 * math.sin(t * 15)))
+        ball(fx, fy - 0.18, 0.014)
     obj.data.materials.append(tear_material())
 
 
@@ -351,6 +411,39 @@ def build_piercing():
     bpy.context.active_object.data.materials.append(mat)
 
 
+def build_fangs():
+    """Teeth in the snarling mouth, two long fangs hanging over the lower lip."""
+    X, Y = np.meshgrid(np.linspace(MOUTH[0] - 0.25, MOUTH[0] + 0.25, 300),
+                       np.linspace(MOUTH[1] - 0.12, MOUTH[1] + 0.1, 200))
+    z, _, _ = face(X.ravel(), Y.ravel())
+    mq = mouth_q(X.ravel(), Y.ravel())[0]
+    rim = z[(mq > 1) & (mq < 1.05)].min()
+    bpy.ops.mesh.primitive_plane_add(size=0.45, location=(MOUTH[0], MOUTH[1] + 0.05, rim - 0.08))
+    bpy.context.active_object.data.materials.append(simple_mat("Mouth", (0.06, 0.005, 0.005, 1), 0.3))
+    ivory = simple_mat("Teeth", (0.92, 0.88, 0.78, 1), 0.2)
+    for top, row in ((True, np.linspace(-0.12, 0.12, 7)), (False, np.linspace(-0.1, 0.1, 6))):
+        for u in row:
+            v = mouth_edge(u, top) + (-0.018 if top else 0.014)
+            bpy.ops.mesh.primitive_cube_add(size=1.0, location=(MOUTH[0] + u, MOUTH[1] + v, rim - 0.02))
+            tooth = bpy.context.active_object
+            tooth.scale = (0.032, 0.04 if top else 0.03, 0.03)
+            tooth.modifiers.new("Round", "BEVEL").width = 0.008
+            bpy.ops.object.shade_smooth()
+            tooth.data.materials.append(ivory)
+    for u in (-0.075, 0.075):
+        base = Vector((MOUTH[0] + u, MOUTH[1] + mouth_edge(u) - 0.01, rim - 0.01))
+        tx, ty = MOUTH[0] + u * 0.95, MOUTH[1] - 0.085
+        tip = Vector((tx, ty, face_z(tx, ty) + 0.012))  # over the lower lip
+        d = tip - base
+        bpy.ops.mesh.primitive_cone_add(vertices=24, radius1=0.018, radius2=0.0008, depth=d.length,
+                                        location=(base + tip) / 2)
+        fang = bpy.context.active_object
+        fang.rotation_mode = "QUATERNION"
+        fang.rotation_quaternion = d.to_track_quat("-Z", "Y")  # cone tip points along -Z
+        bpy.ops.object.shade_smooth()
+        fang.data.materials.append(ivory)
+
+
 def build_lashes():
     """Long dark lashes fanning up off the upper lid."""
     rng = np.random.default_rng(SEED + 7)
@@ -436,6 +529,8 @@ def build_lights_and_camera(scene):
     cam_data.sensor_fit, cam_data.sensor_height, cam_data.lens = "VERTICAL", 36, 72
     cam = bpy.data.objects.new("Camera", cam_data)
     cam.location = (0.02, 0.04, 2.1)  # tight on the eye and brow
+    if "fangs" in EXTRAS:
+        cam.location = (0.12, -0.27, 2.9)  # pulled back to show the mouth
     scene.collection.objects.link(cam)
     scene.camera = cam
 
@@ -487,7 +582,7 @@ def main(out_png, size=1024, samples=64, title=True):
     build_brow()
     build_tear()
     for extra, build in (("horns", build_horns), ("flowers", build_flowers),
-                         ("piercing", build_piercing), ("lashes", build_lashes)):
+                         ("piercing", build_piercing), ("lashes", build_lashes), ("fangs", build_fangs)):
         if extra in EXTRAS:
             build()
     if title:
@@ -496,6 +591,8 @@ def main(out_png, size=1024, samples=64, title=True):
         obj = bpy.data.objects["Title"]
         obj.location = (0.02, 0.33, 0.7)
         obj.scale = (0.3, 0.3, 0.3)
+        if "fangs" in EXTRAS:  # wider frame: up in the corner over the far side of the face
+            obj.location, obj.scale = (0.37, 0.19, 0.7), (0.28, 0.28, 0.28)
     build_lights_and_camera(scene)
 
     scene.render.engine = "CYCLES"

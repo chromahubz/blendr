@@ -222,7 +222,8 @@ def skin_material(name, base):
 
 def build_face():
     if "fangs" in EXTRAS:  # wider frame down to the chin
-        obj = grid_mesh("Face", np.linspace(-0.45, 0.7, 900), np.linspace(-1.0, 0.45, 1000), face)
+        x0, y1 = (-0.6, 0.65) if "horns" in EXTRAS else (-0.45, 0.45)  # horns: pulled back further
+        obj = grid_mesh("Face", np.linspace(x0, 0.7, 900), np.linspace(-1.0, y1, 1000), face)
     else:
         obj = grid_mesh("Face", np.linspace(-0.5, 0.55, 700), np.linspace(-0.45, 0.5, 640), face)
     obj.data.materials.append(skin_material("Face skin", SKIN))
@@ -531,6 +532,8 @@ def build_lights_and_camera(scene):
     cam.location = (0.02, 0.04, 2.1)  # tight on the eye and brow
     if "fangs" in EXTRAS:
         cam.location = (0.12, -0.27, 2.9)  # pulled back to show the mouth
+        if "horns" in EXTRAS:
+            cam.location = (0.1, -0.22, 3.1)  # and further, to fit the horns
     scene.collection.objects.link(cam)
     scene.camera = cam
 
@@ -587,12 +590,16 @@ def main(out_png, size=1024, samples=64, title=True):
             build()
     if title:
         g.TITLE_COLOR = (0.32, 0.15, 0.03, 1)  # dark old gold, reads against the skin
+        if {"horns", "fangs"} <= set(EXTRAS):
+            g.TITLE_COLOR = (1.0, 0.62, 0.08, 1)  # bright gold, reads on red skin
         g.build_title()
         obj = bpy.data.objects["Title"]
         obj.location = (0.02, 0.33, 0.7)
         obj.scale = (0.3, 0.3, 0.3)
         if "fangs" in EXTRAS:  # wider frame: up in the corner over the far side of the face
             obj.location, obj.scale = (0.37, 0.19, 0.7), (0.28, 0.28, 0.28)
+            if "horns" in EXTRAS:  # a horn takes that corner: go lower left instead
+                obj.location = (-0.16, -0.76, 0.6)
     build_lights_and_camera(scene)
 
     scene.render.engine = "CYCLES"

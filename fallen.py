@@ -83,7 +83,7 @@ def lower_face(x, y):
     mq, u, v = mouth_q(x, y)
     up = smoothstep(-0.01, 0.01, v)
     dome = lambda ry: 0.35 * np.sqrt(np.clip(1 - ((x + 0.1) / 1.1) ** 2 - ((y - 0.05) / ry) ** 2, 0, 1))
-    z = dome(1.4) - dome(0.9)  # the face carries on down to the chin
+    z = 0.0 if is_devil() else dome(1.4) - dome(0.9)  # the face carries on down to the chin
     z -= 0.2 * np.exp(-((x - 0.25) / 0.08) ** 2) * smoothstep(-0.25, -0.4, y)  # nose bridge ends
     z += 0.08 * np.exp(-((u / 0.3) ** 2 + ((v + 0.02) / 0.2) ** 2))  # muzzle
     z += 0.05 * np.exp(-((mq - 1.3) / 0.22) ** 2) * up  # upper lip, drawn back
@@ -101,6 +101,60 @@ def lower_face(x, y):
     return z, mq >= 1.0, lips, nostril
 
 
+def is_devil():
+    """Horns and fangs together get a whole-head portrait instead of a cropped close-up."""
+    return {"horns", "fangs"} <= set(EXTRAS)
+
+
+# Devil horn roots on the forehead: (x, y, size, sweep direction). The near horn sits above
+# the eye; the far one is smaller, on the side of the face that turns away.
+DEVIL_HORNS = ((-0.17, 0.62, 1.35, -1), (0.4, 0.66, 1.0, 1))
+
+
+def head_r2(x, y):
+    """<1 inside the head outline, >1 outside. Three-quarter view: the far edge sits just past
+    the nose, the head narrows from a broad cranium down to a pointed chin."""
+    cx = -0.06 + 0.16 * smoothstep(0.0, -0.95, y)  # the chin swings toward the nose side
+    rx = 0.64 * (1 - 0.45 * smoothstep(-0.15, -1.0, y))
+    ry = np.where(y > 0, 1.1, 1.0)
+    return ((x - cx) / rx) ** 2 + ((y - 0.02) / ry) ** 2
+
+
+EAR = np.array([-0.74, 0.04])
+
+
+def ear_q(x, y):
+    """Pointed devil ear on the near side: <1 inside. Pointed up top, round lobe below."""
+    c, s = math.cos(math.radians(-30)), math.sin(math.radians(-30))  # tip leans out and up
+    dx, dy = x - EAR[0], y - EAR[1]
+    u, v = c * dx - s * dy, s * dx + c * dy
+    pinch = np.where(v > 0, np.maximum(1 - (v / 0.36) ** 2, 0.03) ** 0.5, 1.0)
+    return np.sqrt((u / (0.14 * pinch)) ** 2 + (v / np.where(v > 0, 0.4, 0.22)) ** 2)
+
+
+def head(x, y):
+    """Whole-head shape for the devil portrait, with features spaced in thirds
+    (hairline 0.78, brow 0.2, nose base -0.37, chin -0.94)."""
+    z = 0.45 * np.sqrt(np.clip(1 - head_r2(x, y), 0, 1))  # skull
+    eq = ear_q(x, y)
+    ear = 0.16 * np.sqrt(np.clip(1 - eq ** 2, 0, 1)) + 0.04 * np.exp(-((eq - 0.8) / 0.1) ** 2) \
+        - 0.06 * smoothstep(0.65, 0.25, eq)  # rim and bowl
+    z = np.where(eq < 1, np.maximum(z, ear), z)
+    z += 0.05 * np.exp(-(((x + 0.32) / 0.18) ** 2 + ((y + 0.1) / 0.07) ** 2))  # cheekbone
+    z -= 0.045 * np.exp(-(((x + 0.22) / 0.15) ** 2 + ((y + 0.42) / 0.12) ** 2))  # gaunt cheek
+    z -= 0.03 * np.exp(-(((x + 0.58) / 0.1) ** 2 + ((y - 0.25) / 0.12) ** 2))  # temple
+    z += 0.05 * np.exp(-(((x - 0.17) / 0.1) ** 2 + ((y + 0.86) / 0.06) ** 2))  # chin
+    z -= 0.05 * np.exp(-(((x + 0.02) / 0.26) ** 2 + ((y - 0.07) / 0.14) ** 2))  # deep, brooding sockets
+    for bx, by, k, _ in DEVIL_HORNS:  # skin swells around the horn roots
+        z += 0.05 * k * np.exp(-(((x - bx) / (0.1 * k)) ** 2 + ((y - by) / (0.08 * k)) ** 2))
+    return z
+
+
+def widows_peak(x, y):
+    line = 0.8 - 0.14 * np.exp(-((x - 0.12) / 0.09) ** 2)
+    return smoothstep(line, line + 0.03, y)
+
+
 def brow_line(x):
     return 0.21 - BROW_DROP * smoothstep(-0.3, 0.15, x)  # slants down toward the nose: a frown
 
@@ -111,7 +165,10 @@ def face(x, y):
     up = smoothstep(-0.015, 0.015, v)  # soft upper/lower split (no ledges at the corners)
     u, _ = eye_local(x, y)
     qe = np.sqrt((u / EYE_W) ** 2 + (v / np.where(v > 0, EYE_H_TOP, EYE_H_BOT)) ** 2)  # plain ellipse for the lid rings
-    z = 0.35 * np.sqrt(np.clip(1 - ((x + 0.1) / 1.1) ** 2 - ((y - 0.05) / 0.9) ** 2, 0, 1))
+    if is_devil():
+        z = head(x, y)
+    else:
+        z = 0.35 * np.sqrt(np.clip(1 - ((x + 0.1) / 1.1) ** 2 - ((y - 0.05) / 0.9) ** 2, 0, 1))
     z -= 0.22 * smoothstep(0.3, 0.6, x)  # far side of the face turns away
     z += 0.2 * np.exp(-((x - 0.25) / 0.08) ** 2) * smoothstep(0.25, 0.05, y)  # nose bridge
     yb = brow_line(x)
@@ -158,6 +215,11 @@ def face(x, y):
     if "fangs" in EXTRAS:
         zl, keep_l, lips, nostril = lower_face(x, y)
         z, keep, red, lashes = z + zl, keep & keep_l, red + lips, lashes + nostril
+    if is_devil():
+        keep = keep & ((head_r2(x, y) < 0.995) | (ear_q(x, y) < 1))  # head and ear against the dark
+        brow = brow + widows_peak(x, y)  # slicked black hair, painted with the brow colour
+        for bx, by, k, _ in DEVIL_HORNS:  # irritated skin around the horn roots
+            red = red + 0.6 * np.exp(-(((x - bx) / (0.08 * k)) ** 2 + ((y - by) / (0.065 * k)) ** 2))
     return z, keep, np.stack([np.clip(red, 0, 1), np.clip(brow, 0, 1), lashes, shadow,
                                   cracks, np.clip(freckles, 0, 0.8)], axis=1)
 
@@ -231,13 +293,16 @@ def skin_material(name, base):
 
 def build_face():
     if "fangs" in EXTRAS:  # wider frame down to the chin
-        x0, y1 = (-0.6, 0.65) if "horns" in EXTRAS else (-0.45, 0.45)  # horns: pulled back further
-        obj = grid_mesh("Face", np.linspace(x0, 0.7, 900), np.linspace(-1.0, y1, 1000), face)
+        if is_devil():  # whole head; fine enough without subdivision
+            obj = grid_mesh("Face", np.linspace(-0.95, 0.95, 1000), np.linspace(-1.2, 1.25, 1250), face)
+        else:
+            obj = grid_mesh("Face", np.linspace(-0.45, 0.7, 900), np.linspace(-1.0, 0.45, 1000), face)
     else:
         obj = grid_mesh("Face", np.linspace(-0.5, 0.55, 700), np.linspace(-0.45, 0.5, 640), face)
     obj.data.materials.append(skin_material("Face skin", SKIN))
-    sub = obj.modifiers.new("Smooth", "SUBSURF")
-    sub.levels, sub.render_levels = 0, 1
+    if not is_devil():
+        sub = obj.modifiers.new("Smooth", "SUBSURF")
+        sub.levels, sub.render_levels = 0, 1
 
 
 def build_eye():
@@ -340,6 +405,10 @@ def build_horns():
     bump.inputs["Strength"].default_value = 0.35
     nt.links.new(wave.outputs["Fac"], bump.inputs["Height"])
     nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    if is_devil():
+        for bx, by, k, d in DEVIL_HORNS:
+            build_devil_horn(bx, by, k * HORN_SIZE, d, mat)
+        return
     for bx, by, d in ((-0.22, 0.24, -1), (0.26, 0.26, 1)):
         curve = bpy.data.curves.new("Horn", "CURVE")
         curve.dimensions = "3D"
@@ -358,6 +427,37 @@ def build_horns():
         obj = bpy.data.objects.new("Horn", curve)
         bpy.context.collection.objects.link(obj)
         obj.data.materials.append(mat)
+
+
+def build_devil_horn(bx, by, k, d, mat):
+    """A thick-rooted horn sweeping up and out from the forehead, tapering to a point, with
+    growth rings along its length."""
+    ctrl = np.array([(0, 0, -0.02), (-0.03, 0.08, 0.1), (-0.1, 0.17, 0.15), (-0.17, 0.24, 0.14),
+                     (-0.2, 0.31, 0.1), (-0.17, 0.37, 0.06)]) * k
+    ctrl[:, 0] *= -d  # sweep outward on either side
+    # Catmull-Rom through the control points, densely, so radius can ripple into rings.
+    pad = np.vstack([2 * ctrl[0] - ctrl[1], ctrl, 2 * ctrl[-1] - ctrl[-2]])
+    pts = []
+    for i in range(1, len(pad) - 2):
+        p0, p1, p2, p3 = pad[i - 1:i + 3]
+        for t in np.linspace(0, 1, 12, endpoint=False):
+            pts.append(0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t
+                              + (3 * p1 - p0 - 3 * p2 + p3) * t ** 3))
+    pts.append(ctrl[-1])
+    curve = bpy.data.curves.new("Horn", "CURVE")
+    curve.dimensions = "3D"
+    curve.bevel_depth = 0.07 * k
+    curve.bevel_resolution = 6
+    spl = curve.splines.new("POLY")
+    spl.points.add(len(pts) - 1)
+    z0 = face_z(bx, by)
+    for n, (p, (dx, dy, dz)) in enumerate(zip(spl.points, pts)):
+        t = n / (len(pts) - 1)
+        p.co = (bx + dx, by + dy, z0 + dz, 1)
+        p.radius = (1 - t) ** 1.2 * (1 + 0.07 * math.sin(n * 1.9)) + 0.02  # taper + rings
+    obj = bpy.data.objects.new("Horn", curve)
+    bpy.context.collection.objects.link(obj)
+    obj.data.materials.append(mat)
 
 
 def build_flowers():
@@ -428,7 +528,7 @@ def build_fangs():
     z, _, _ = face(X.ravel(), Y.ravel())
     mq = mouth_q(X.ravel(), Y.ravel())[0]
     rim = z[(mq > 1) & (mq < 1.05)].min()
-    bpy.ops.mesh.primitive_plane_add(size=0.45, location=(MOUTH[0], MOUTH[1] + 0.05, rim - 0.08))
+    bpy.ops.mesh.primitive_plane_add(size=0.36, location=(MOUTH[0], MOUTH[1] + 0.03, rim - 0.08))
     bpy.context.active_object.data.materials.append(simple_mat("Mouth", (0.06, 0.005, 0.005, 1), 0.3))
     ivory = simple_mat("Teeth", (0.92, 0.88, 0.78, 1), 0.2)
     for top, row in ((True, np.linspace(-0.12, 0.12, 7)), (False, np.linspace(-0.1, 0.1, 6))):
@@ -541,8 +641,8 @@ def build_lights_and_camera(scene):
     cam.location = (0.02, 0.04, 2.1)  # tight on the eye and brow
     if "fangs" in EXTRAS:
         cam.location = (0.12, -0.27, 2.9)  # pulled back to show the mouth
-        if "horns" in EXTRAS:
-            cam.location = (0.1, -0.22, 3.1)  # and further, to fit the horns
+        if is_devil():
+            cam.location = (0.0, 0.14, 5.1)  # the whole head, horn tips to chin
     scene.collection.objects.link(cam)
     scene.camera = cam
 
@@ -607,8 +707,8 @@ def main(out_png, size=1024, samples=64, title=True):
         obj.scale = (0.3, 0.3, 0.3)
         if "fangs" in EXTRAS:  # wider frame: up in the corner over the far side of the face
             obj.location, obj.scale = (0.37, 0.19, 0.7), (0.28, 0.28, 0.28)
-            if "horns" in EXTRAS:  # a horn takes that corner: go lower left instead
-                obj.location = (-0.16, -0.76, 0.6)
+            if is_devil():  # lower left, over the shadow under the jaw
+                obj.location, obj.scale = (-0.5, -0.92, 0.6), (0.4, 0.4, 0.4)
     build_lights_and_camera(scene)
 
     scene.render.engine = "CYCLES"

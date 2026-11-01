@@ -1,8 +1,8 @@
 """The vampire take on fallen.py: blood tear, blood-red slit-pupil eye, snarling mouth with fangs.
---devil: red skin, black demon eye, horns as well as fangs.
+--devil: red skin, black demon eye, horns as well as fangs. --lava: a glowing lava tear.
 
-Run with Blender:      blender -b -P fallen_fangs.py -- fallen_fangs.png [--no-title] [--devil]
-Or with the bpy module: python fallen_fangs.py fallen_fangs.png [--no-title] [--devil]
+Run with Blender:      blender -b -P fallen_fangs.py -- fallen_fangs.png [--no-title] [--devil] [--lava]
+Or with the bpy module: python fallen_fangs.py fallen_fangs.png [--no-title] [--devil] [--lava]
 """
 import os
 import sys
@@ -18,4 +18,6 @@ if __name__ == "__main__":
         fc.f.BROW_COLOR = (0.02, 0.015, 0.012, 1)  # black brow
     else:
         fc.apply(1, "blood", "vampire", ("fangs",), "pale")
+    if "--lava" in args:
+        fc.f.TEAR_KIND, fc.f.TEAR_COLOR = fc.TEARS["lava"]
     fc.f.main(os.path.abspath(paths[0] if paths else "fallen_fangs.png"), title="--no-title" not in args)

@@ -35,6 +35,8 @@ EYESHADOW = (0.3, 0.02, 0.25, 1)
 HORN_COLOR = (0.06, 0.02, 0.015, 1)
 METAL = (0.9, 0.9, 0.92, 1)  # piercing metal
 SEED = 0  # randomness for extras
+HORN_SIZE = 1.0
+CRACK_GLOW = None  # a colour makes the cracks glow like magma
 smoothstep = g.smoothstep
 
 
@@ -206,6 +208,13 @@ def skin_material(name, base):
             mix.inputs["B"].default_value = paint
             link.new(sep.outputs[channel], mix.inputs["Factor"])
             color = mix.outputs["Result"]
+        if attr_name == "masks2" and CRACK_GLOW:  # cracks (green channel) glow
+            glow = n.new("ShaderNodeMath")
+            glow.operation = "MULTIPLY"
+            glow.inputs[1].default_value = 8.0
+            link.new(sep.outputs["Green"], glow.inputs[0])
+            link.new(glow.outputs[0], bsdf.inputs["Emission Strength"])
+            bsdf.inputs["Emission Color"].default_value = CRACK_GLOW
     link.new(color, bsdf.inputs["Base Color"])
     pores = n.new("ShaderNodeTexNoise")
     pores.inputs["Scale"].default_value = 900.0
@@ -334,7 +343,7 @@ def build_horns():
     for bx, by, d in ((-0.22, 0.24, -1), (0.26, 0.26, 1)):
         curve = bpy.data.curves.new("Horn", "CURVE")
         curve.dimensions = "3D"
-        curve.bevel_depth = 0.045
+        curve.bevel_depth = 0.045 * HORN_SIZE
         curve.bevel_resolution = 4
         spl = curve.splines.new("NURBS")
         pts = [(0, 0, 0, 1.0), (0.02, 0.04, 0.08, 0.8), (0.06, 0.08, 0.13, 0.55),
@@ -342,7 +351,7 @@ def build_horns():
         spl.points.add(len(pts) - 1)
         z0 = face_z(bx, by) - 0.01
         for p, (dx, dy, dz, r) in zip(spl.points, pts):
-            p.co = (bx + d * dx, by + dy, z0 + dz, 1)
+            p.co = (bx + d * dx * HORN_SIZE, by + dy * HORN_SIZE, z0 + dz * HORN_SIZE, 1)
             p.radius = r
         spl.use_endpoint_u = True
         spl.order_u = 4
